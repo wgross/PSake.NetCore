@@ -96,11 +96,16 @@ Task build_assemblies -description "Compile all projects into .Net assemblies" {
     }
 }
 
-Task clean_assemblies -description "Remove all assemblies (Dll and Exe) under the project root" {
+Task clean_assemblies -description "Remove all the usual build directories under the project root" {
     
     $script:projectJsonItems | ForEach-Object {
 
-        Get-ChildItem -Path $_.Directory -Include "*.dll","*.exe" -File -Recurse | Remove-Item
+        # just remove the usual oputput directories instead of spefific files or file extsnsions.
+        # This included Cosumentatin files, config files or other artefacts which are copied 
+        # to the build directory
+
+        Remove-Item -Path (Join-Path $_.Directory bin) -Recurse -ErrorAction SilentlyContinue
+        Remove-Item -Path (Join-Path $_.Directory obj) -Recurse -ErrorAction SilentlyContinue
     }
 
 } -depends query_projectstructre
@@ -112,8 +117,22 @@ Task test_assemblies -description "Run the unit test under 'test'. Output is wri
         Push-Location $_.Directory
         try {
             
-            # the projects directory name is taken as the name of the test result file.
-            &  $dotnet test -xml "$script:testResultsDirectory\$($_.Directory.BaseName).xml"
+            $testResultFileName = Join-Path $script:testResultsDirectory "$($_.Directory.BaseName).xml"
+
+            # Check if nunit or xunit is used as a test runner. They use diffrent parameters
+            # for test result file path specification
+
+            $testProjectJsonContent = Get-Content $_.FullName -Raw | ConvertFrom-Json
+            if($testProjectJsonContent.testRunner -eq "xunit") {
+
+                # the projects directory name is taken as the name of the test result file.
+                &  $dotnet test -xml "$script:testResultsDirectory\$($_.Directory.BaseName).xml"
+
+            } else {
+                
+                # the projects directory name is taken as the name of the test result file.
+                &  $dotnet test -result:$testResultFileName
+            }
 
         } finally {
             Pop-Location
