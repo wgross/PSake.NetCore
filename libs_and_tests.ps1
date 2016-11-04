@@ -59,9 +59,9 @@ Task restore_dependencies -description "Restore nuget dependencies" {
 Task report_dependencies -description "Print a list of all nuget dependencies. This is useful for mainline clearing." {
     
     # For Mainline clearing a complete set of nuget packages has to be retrieved.
-    # These are taken from the 'dependensies' section of all src project.jsons
+    # These are taken from the 'dependencies' section of all src project.jsons
 
-    $nugetDependecies = $script:sourceProjectJsonItems | Get-Content -Raw | ConvertFrom-Json | ForEach-Object {
+    $nugetDependencies = $script:sourceProjectJsonItems | Get-Content -Raw | ConvertFrom-Json | ForEach-Object {
         $_.dependencies.PSObject.Properties | ForEach-Object {
             if($_.Value -is [string]) {
                 [pscustomobject]@{
@@ -76,7 +76,7 @@ Task report_dependencies -description "Print a list of all nuget dependencies. T
             }
         }
     }
-    $nugetDependecies | Group-Object Id | Select-Object Name,Group
+    $nugetDependencies | Group-Object Id | Select-Object Name,Group
 
 } -depends query_projectstructre
 
