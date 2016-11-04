@@ -1,4 +1,4 @@
-﻿Import-Module Pester
+﻿Import-Module Psake
 
 $dotnet = (Get-Command dotnet.exe).Path
 
@@ -33,7 +33,7 @@ Task clean_projectstruture -description "Remove temporary build files" {
 
 #region Build targets for NuGet dependencies 
 
-Task clean_nuget -description "Remove nuget package cache from current users home" {
+Task clean_dependencies -description "Remove nuget package cache from current users home" {
     
     # dotnet cli utility uses the users package cache only. 
     # a project local nuget cache can be enforced but is not necessary by default.
@@ -43,7 +43,7 @@ Task clean_nuget -description "Remove nuget package cache from current users hom
     Remove-Item (Join-Path $HOME .nuget\packages) -Force -Recurse -ErrorAction SilentlyContinue
 }
 
-Task restore_nuget -description "Restore nuget dependencies" {
+Task restore_dependencies -description "Restore nuget dependencies" {
     
     Push-Location $PSScriptRoot
     try {
@@ -56,7 +56,7 @@ Task restore_nuget -description "Restore nuget dependencies" {
     }
 }
 
-Task report_nuget -description "Print a list of all nuget dependencies. This is useful for mainline clearing." {
+Task report_dependencies -description "Print a list of all nuget dependencies. This is useful for mainline clearing." {
     
     # For Mainline clearing a complete set of nuget packages has to be retrieved.
     # These are taken from the 'dependensies' section of all src project.jsons
@@ -126,10 +126,10 @@ Task test_assemblies -description "Run the unit test under 'test'. Output is wri
             if($testProjectJsonContent.testRunner -eq "xunit") {
 
                 # the projects directory name is taken as the name of the test result file.
-                &  $dotnet test -xml "$script:testResultsDirectory\$($_.Directory.BaseName).xml"
+                &  $dotnet test -xml $testResultFileName
 
             } else {
-                
+                # NUnit: 
                 # the projects directory name is taken as the name of the test result file.
                 &  $dotnet test -result:$testResultFileName
             }
@@ -144,7 +144,7 @@ Task test_assemblies -description "Run the unit test under 'test'. Output is wri
 #endregion
 
 Task clean -description "The project tree is clean: all artifacts created by the development tool chain are removed"  -depends clean_assemblies
-Task restore -description "External dependencies are restored.The project is ready to be built." -depends restore_nuget
+Task restore -description "External dependencies are restored.The project is ready to be built." -depends restore_dependencies
 Task build -description "The project is built: all artifacts created by the development tool chain are created" -depends restore,build_assemblies
 Task test -description "The project is tested: all automated tests of the project are run" -depends build,test_assemblies
 
