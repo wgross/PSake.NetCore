@@ -4,7 +4,7 @@ $dotnet = (Get-Command dotnet.exe).Path
 
 #region Define file sets
 
-Task query_projectstructre -description "Collect infomation about the project structure which is useful for other build tasks"  {
+Task query_projectstructure -description "Collect infomation about the project structure which is useful for other build tasks"  {
 
     # All soures are under /src
     $script:sourceDirectoryName = Join-Path $PSScriptRoot src -Resolve
@@ -22,12 +22,12 @@ Task query_projectstructre -description "Collect infomation about the project st
     $script:testResultsDirectory = New-Item -Path $PSScriptRoot\.testresults -ItemType Directory -ErrorAction SilentlyContinue
 }
 
-Task clean_projectstruture -description "Remove temporary build files" {
+Task clean_projectstructure -description "Remove temporary build files" {
     
     # Remove temporary test result directory
     Remove-Item $script:testResultsDirectory -Recurse -Force -ErrorAction SilentlyContinue
 
-} -depends query_projectstructre
+} -depends query_projectstructure
 
 #endregion 
 
@@ -78,7 +78,7 @@ Task report_dependencies -description "Print a list of all nuget dependencies. T
     }
     $nugetDependencies | Group-Object Id | Select-Object Name,Group
 
-} -depends query_projectstructre
+} -depends query_projectstructure
 
 #endregion
 
@@ -108,7 +108,7 @@ Task clean_assemblies -description "Remove all the usual build directories under
         Remove-Item -Path (Join-Path $_.Directory obj) -Recurse -ErrorAction SilentlyContinue
     }
 
-} -depends query_projectstructre
+} -depends query_projectstructure
 
 Task test_assemblies -description "Run the unit test under 'test'. Output is written to .testresults directory" {
     
@@ -139,7 +139,7 @@ Task test_assemblies -description "Run the unit test under 'test'. Output is wri
         }
     }
 
-} -depends query_projectstructre
+} -depends query_projectstructure
 
 #endregion
 
