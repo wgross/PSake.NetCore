@@ -148,4 +148,4 @@ Task restore -description "External dependencies are restored.The project is rea
 Task build -description "The project is built: all artifacts created by the development tool chain are created" -depends restore,build_assemblies
 Task test -description "The project is tested: all automated tests of the project are run" -depends build,test_assemblies
 
-Task default -depends clean,restore,test
+Task default -depends clean,restore,build,test
