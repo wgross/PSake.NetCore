@@ -150,10 +150,12 @@ Task test_assemblies -description "Run the unit test under 'test'. Output is wri
                 # the projects directory name is taken as the name of the test result file.
                 &  $script:dotnet test -xml $testResultFileName
 
-            } else {
+            } elseif($testProjectJsonContent.testRunner -eq "nunit") {
                 # NUnit: 
                 # the projects directory name is taken as the name of the test result file.
                 &  $script:dotnet test -result:$testResultFileName
+            } else {
+                "Skipping test project $_ : No test runner defined" | Write-Host -ForegroundColor DarkYellow
             }
 
         } finally {
