@@ -38,7 +38,7 @@ Task query_workspace -description "Collect infomation about the workspace struct
     }
 }
 
-Task clean_workspace -description "Remove temporary build files" {
+Task clean_workspace -description "Remove temporary build files which are not removed by other 'clean_<artifact>' tasks" {
     
     # Remove from workspace...
     @(
@@ -65,7 +65,7 @@ Task clean_dependencies -description "Remove nuget package cache from current us
     Remove-Item (Join-Path $HOME .nuget\packages) -Force -Recurse -ErrorAction SilentlyContinue
 }
 
-Task restore_dependencies -description "Restore nuget dependencies" {
+Task restore_dependencies -description "Restore nuget dependencies for all projects" {
     
     Push-Location $PSScriptRoot
     try {
@@ -78,7 +78,7 @@ Task restore_dependencies -description "Restore nuget dependencies" {
     }
 }
 
-Task report_dependencies -description "Print a list of all nuget dependencies. This is useful for mainline clearing." {
+Task query_dependencies -description "Print a list of all nuget dependencies. This is useful for OSS licence clearing" {
     
     # For Mainline clearing a complete set of nuget packages has to be retrieved.
     # These are taken from the 'dependencies' section of all src project.jsons
@@ -118,7 +118,7 @@ Task build_assemblies -description "Compile all projects into .Net assemblies" {
     }
 }
 
-Task clean_assemblies -description "Remove all the usual build directories under the project root" {
+Task clean_assemblies -description "Removes the assembles built by 'build_assembly' task" {
     
     $script:projectJsonItems | ForEach-Object {
 
