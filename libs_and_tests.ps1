@@ -242,6 +242,23 @@ Task report_nugetConfig -description "Extracts some config values from the effec
 
 #endregion
 
+#region Task for reporting the state of the workspace 
+
+Task report_test_assemblies -description "Retrieves a report of failed tests" {
+    
+    Get-ChildItem -Path $script:testResultsDirectory -Filter *.xml | ForEach-Object {        
+        $failedTests = (Select-Xml -Path $_.FullName -XPath "//test-case[@result != 'Passed']").Node 
+        if($failedTests) {
+            $failedTests | Select name,result
+        } else {
+            "No test failed: $($_.Name)" | Write-Host -ForegroundColor Green
+        }
+    }
+
+} -depends query_workspace
+
+#endregion
+
 Task clean -description "The project tree is clean: all artifacts created by the development tool chain are removed"  -depends clean_workspace,clean_assemblies
 Task restore -description "External dependencies are restored.The project is ready to be built." -depends restore_dependencies
 Task build -description "The project is built: all artifacts created by the development tool chain are created" -depends restore,build_assemblies
@@ -249,4 +266,5 @@ Task test -description "The project is tested: all automated tests of the projec
 Task measure -description "The project is measured: all benchmarls are running" -depends build_assemblies,measure_assemblies
 Task pack -description "All nuget packages are built" -depends build_packages
 Task publish -description "All atrefacts are published to their destinations" -depends publish_packages
+Task report -description "Calls all reports" -depends report_test_assemblies
 Task default -depends clean,restore,build,test,pack
