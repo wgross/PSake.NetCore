@@ -183,9 +183,9 @@ Task measure_assemblies -description "Run the benchmark projects under measure. 
 
 #region Tasks for Nuget packages
 
-Task build_packages -description "Create nuget packages from all projects having pack options defined" {
+Task build_packages -description "Create nuget packages from all projects having packOptions defined" {
     
-    $script:projectJsonItems | ForEach-Object {
+    $script:projectItems.src | ForEach-Object {
 
         Push-Location $_.Directory 
         try {
@@ -196,13 +196,12 @@ Task build_packages -description "Create nuget packages from all projects having
                 & $script:dotnet pack -c "Release" -o $script:packageBuildDirectory
 
             } else {
-                "Skipping project $($_.Fullname)" | Write-Host
+                "Skipping project $($_.Fullname). No packOptions defined." | Write-Host -ForegroundColor DarkYellow
             }
             
         } finally {
             Pop-Location
         }
-
     }
 
 } -depends query_workspace
@@ -248,6 +247,6 @@ Task restore -description "External dependencies are restored.The project is rea
 Task build -description "The project is built: all artifacts created by the development tool chain are created" -depends restore,build_assemblies
 Task test -description "The project is tested: all automated tests of the project are run" -depends build,test_assemblies
 Task measure -description "The project is measured: all benchmarls are running" -depends build_assemblies,measure_assemblies
-Task pack -description "All nuget packages a created" -depends build_packages
+Task pack -description "All nuget packages are built" -depends build_packages
 Task publish -description "All atrefacts are published to their destinations" -depends publish_packages
 Task default -depends clean,restore,build,test,pack
