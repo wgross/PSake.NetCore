@@ -7,23 +7,20 @@ $script:nuget = (Get-Command nuget.exe).Path
 
 Task query_workspace -description "Collect infomation about the workspace structure which is useful for other build tasks"  {
 
-    # All soures are under /src
-    $script:sourceDirectoryName = Join-Path $PSScriptRoot src -Resolve
-    # All tests are under /test
-    $script:testDirectoryName = Join-Path $PSScriptRoot test -Resolve
+    $script:projectItems = @{}
+    $script:projectItems.all = @()
 
-    # Get file items for all projects
-    $script:projectJsonItems = Get-ChildItem -Path $PSScriptRoot -Include "project.json" -File -Recurse
-    $script:projectJsonItems | Select-Object -ExpandProperty FullName | ForEach-Object { Write-Host "found projects: $_" }
+    $globalJsonContent = Get-Content $PSScriptRoot\global.json -Raw | ConvertFrom-Json 
+    $globalJsonContent.projects | ForEach-Object {
+        $projectSubDir = $_ 
+        $script:projectItems.Add($projectSubDir,(Get-ChildItem -Path (Join-Path $PSScriptRoot $projectSubDir)  -Include "project.json" -File -Recurse))
+        $script:projectItems[$projectSubDir] | Select-Object -ExpandProperty FullName | ForEach-Object { Write-Host "found projects in $projectSubDir : $_" }
+        $script:projectItems.all += $script:projectItems[$projectSubDir]
+    } 
 
-    # Subset of src projects
-    $script:testProjectJsonItems = $script:projectJsonItems | Where-Object { $_.DirectoryName.StartsWith($script:testDirectoryName) }
-    $script:testProjectJsonItems | Select-Object -ExpandProperty FullName | ForEach-Object { Write-Host "found test project: $_" }
+    ## ADDITIONAL
 
-    # Subset of tets projects
-    $script:sourceProjectJsonItems = $script:projectJsonItems | Where-Object { $_.DirectoryName.StartsWith($script:sourceDirectoryName) }
-
-    # test results are stored in a seperate directory
+    # test results are stored in a separate directory
     if(Test-Path $PSScriptRoot\.testresults) {
         $script:testResultsDirectory = Get-Item -Path $PSScriptRoot\.testresults
     } else {   
@@ -82,8 +79,9 @@ Task query_dependencies -description "Print a list of all nuget dependencies. Th
     
     # For Mainline clearing a complete set of nuget packages has to be retrieved.
     # These are taken from the 'dependencies' section of all src project.jsons
+    # !! framework specific dependencies are not queried !!
 
-    $nugetDependencies = $script:sourceProjectJsonItems | Get-Content -Raw | ConvertFrom-Json | ForEach-Object {
+    $nugetDependencies = $script:projectItems.src | Get-Content -Raw | ConvertFrom-Json | ForEach-Object {
         $_.dependencies.PSObject.Properties | ForEach-Object {
             if($_.Value -is [string]) {
                 [pscustomobject]@{
@@ -120,7 +118,7 @@ Task build_assemblies -description "Compile all projects into .Net assemblies" {
 
 Task clean_assemblies -description "Removes the assembles built by 'build_assembly' task" {
     
-    $script:projectJsonItems | ForEach-Object {
+    $script:projectItems.all | ForEach-Object {
 
         # just remove the usual oputput directories instead of spefific files or file extsnsions.
         # This included Cosumentatin files, config files or other artefacts which are copied 
@@ -134,7 +132,7 @@ Task clean_assemblies -description "Removes the assembles built by 'build_assemb
 
 Task test_assemblies -description "Run the unit test under 'test'. Output is written to .testresults directory" {
     
-    $script:testProjectJsonItems | ForEach-Object {
+    $script:projectItems.test | ForEach-Object {
 
         Push-Location $_.Directory
         try {
@@ -157,6 +155,22 @@ Task test_assemblies -description "Run the unit test under 'test'. Output is wri
             } else {
                 "Skipping test project $_ : No test runner defined" | Write-Host -ForegroundColor DarkYellow
             }
+
+        } finally {
+            Pop-Location
+        }
+    }
+
+} -depends query_workspace
+
+Task measure_assemblies -description "Run the benchmark projects under measure. Output is written to the .benchmark directory" {
+    
+    $script:projectItems.measure | ForEach-Object {
+
+        Push-Location $_.Directory
+        try {
+
+            & $script:dotnet run
 
         } finally {
             Pop-Location
@@ -233,6 +247,7 @@ Task clean -description "The project tree is clean: all artifacts created by the
 Task restore -description "External dependencies are restored.The project is ready to be built." -depends restore_dependencies
 Task build -description "The project is built: all artifacts created by the development tool chain are created" -depends restore,build_assemblies
 Task test -description "The project is tested: all automated tests of the project are run" -depends build,test_assemblies
+Task measure -description "The project is measured: all benchmarls are running" -depends build_assemblies,measure_assemblies
 Task pack -description "All nuget packages a created" -depends build_packages
 Task publish -description "All atrefacts are published to their destinations" -depends publish_packages
 Task default -depends clean,restore,build,test,pack
