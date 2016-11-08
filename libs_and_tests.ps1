@@ -17,36 +17,7 @@ Task query_workspace -description "Collect infomation about the workspace struct
         $script:projectItems[$projectSubDir] | Select-Object -ExpandProperty FullName | ForEach-Object { Write-Host "found projects in $projectSubDir : $_" }
         $script:projectItems.all += $script:projectItems[$projectSubDir]
     } 
-
-    ## ADDITIONAL
-
-    # test results are stored in a separate directory
-    if(Test-Path $PSScriptRoot\.testresults) {
-        $script:testResultsDirectory = Get-Item -Path $PSScriptRoot\.testresults
-    } else {   
-        $script:testResultsDirectory = New-Item -Path $PSScriptRoot\.testresults -ItemType Directory
-    }
-
-    # nuget packages are stored in .packages
-    if(Test-Path $PSScriptRoot\.packages) {
-        $script:packageBuildDirectory = Get-Item -Path $PSScriptRoot\.packages
-    } else {   
-        $script:packageBuildDirectory = New-Item -Path $PSScriptRoot\.packages -ItemType Directory
-    }
 }
-
-Task clean_workspace -description "Remove temporary build files which are not removed by other 'clean_<artifact>' tasks" {
-    
-    # Remove from workspace...
-    @(
-        # ...test results
-        $script:testResultsDirectory
-        # ...nuget packages
-        $script:packageBuildDirectory
-
-    ) | Remove-Item  -Recurse -Force -ErrorAction SilentlyContinue
-
-} -depends query_workspace
 
 #endregion 
 
@@ -104,6 +75,31 @@ Task query_dependencies -description "Print a list of all nuget dependencies. Th
 
 #region Tasks for .Net Assemblies
 
+Task init_assemblies {
+    
+    # test results are stored in a separate directory
+    if(Test-Path $PSScriptRoot\.testresults) {
+        $script:testResultsDirectory = Get-Item -Path $PSScriptRoot\.testresults
+    } else {   
+        $script:testResultsDirectory = New-Item -Path $PSScriptRoot\.testresults -ItemType Directory
+    }
+
+}
+
+Task clean_assemblies -description "Removes the assembles built by 'build_assembly' task" {
+    
+    $script:projectItems.all | ForEach-Object {
+
+        # just remove the usual oputput directories instead of spefific files or file extensions.
+        # This includes automatically assemblies, config files or other artefacts which are copied 
+        # to the build directory
+
+        Remove-Item -Path (Join-Path $_.Directory bin) -Recurse -ErrorAction SilentlyContinue
+        Remove-Item -Path (Join-Path $_.Directory obj) -Recurse -ErrorAction SilentlyContinue
+    }
+
+} -depends query_workspace
+
 Task build_assemblies -description "Compile all projects into .Net assemblies" {
 
     Push-Location $PSScriptRoot
@@ -115,20 +111,6 @@ Task build_assemblies -description "Compile all projects into .Net assemblies" {
         Pop-Location
     }
 }
-
-Task clean_assemblies -description "Removes the assembles built by 'build_assembly' task" {
-    
-    $script:projectItems.all | ForEach-Object {
-
-        # just remove the usual oputput directories instead of spefific files or file extsnsions.
-        # This included Cosumentatin files, config files or other artefacts which are copied 
-        # to the build directory
-
-        Remove-Item -Path (Join-Path $_.Directory bin) -Recurse -ErrorAction SilentlyContinue
-        Remove-Item -Path (Join-Path $_.Directory obj) -Recurse -ErrorAction SilentlyContinue
-    }
-
-} -depends query_workspace
 
 Task test_assemblies -description "Run the unit test under 'test'. Output is written to .testresults directory" {
     
@@ -149,9 +131,11 @@ Task test_assemblies -description "Run the unit test under 'test'. Output is wri
                 &  $script:dotnet test -xml $testResultFileName
 
             } elseif($testProjectJsonContent.testRunner -eq "nunit") {
+
                 # NUnit: 
                 # the projects directory name is taken as the name of the test result file.
                 &  $script:dotnet test -result:$testResultFileName
+
             } else {
                 "Skipping test project $_ : No test runner defined" | Write-Host -ForegroundColor DarkYellow
             }
@@ -161,7 +145,25 @@ Task test_assemblies -description "Run the unit test under 'test'. Output is wri
         }
     }
 
-} -depends query_workspace
+} -depends query_workspace,init_assemblies
+
+Task report_test_assemblies -description "Retrieves a report of failed tests" {
+    
+    # The task is seperated from the 'test_assemblies' task to make it callable independently
+
+    Get-ChildItem -Path $script:testResultsDirectory -Filter *.xml | ForEach-Object {        
+        
+        # This works for nunit ... but xunit?
+
+        $failedTests = (Select-Xml -Path $_.FullName -XPath "//test-case[@result != 'Passed']").Node 
+        if($failedTests) {
+            $failedTests | Select name,result
+        } else {
+            "No test failed: $($_.Name)" | Write-Host -ForegroundColor Green
+        }
+    }
+
+} -depends query_workspace,init_assemblies
 
 Task measure_assemblies -description "Run the benchmark projects under measure. Output is written to the .benchmark directory" {
     
@@ -182,6 +184,23 @@ Task measure_assemblies -description "Run the benchmark projects under measure. 
 #endregion
 
 #region Tasks for Nuget packages
+
+Task init_packages {
+ 
+    # nuget packages are stored in .packages. 
+    # The directory is created if necessary
+
+    if(Test-Path $PSScriptRoot\.packages) {
+        $script:packageBuildDirectory = Get-Item -Path $PSScriptRoot\.packages
+    } else {   
+        $script:packageBuildDirectory = New-Item -Path $PSScriptRoot\.packages -ItemType Directory
+    }
+}
+
+Task clean_packages -description "Removes nuget packages build directory" {
+    
+    Remove-Item $PSScriptRoot\.packages -Recurse -Force -ErrorAction SilentlyContinue
+}
 
 Task build_packages -description "Create nuget packages from all projects having packOptions defined" {
     
@@ -204,18 +223,13 @@ Task build_packages -description "Create nuget packages from all projects having
         }
     }
 
-} -depends query_workspace
-
-Task clean_packages -description "Removes nuget packages build directory" {
-    
-    Remove-Item $script:packageBuildDirectory -Recurse -Force
-
-} -depends query_workspace
+} -depends query_workspace,init_packages
 
 Task publish_packages -description "Makes the packages known to the used package source" {
     
     # Publishing a package requires the nuget.exe. 
     # Credentials/api key of the package feed ist url are taken from the efective Nuget.Config
+
     Push-Location $script:packageBuildDirectory
     try {
         
@@ -229,7 +243,7 @@ Task publish_packages -description "Makes the packages known to the used package
         Pop-Location
     }
 
-} -depends query_workspace
+} -depends query_workspace,init_packages
 
 Task report_nugetConfig -description "Extracts some config values from the effective Nuget config" {
     
@@ -242,29 +256,80 @@ Task report_nugetConfig -description "Extracts some config values from the effec
 
 #endregion
 
-#region Task for reporting the state of the workspace 
+#region Tasks for coverage reporting
 
-Task report_test_assemblies -description "Retrieves a report of failed tests" {
+Task init_coverage {
+
+    # coverage information is stoired i n .coverage.
+    # he directoyr is created if necessary
+
+    if(Test-Path $PSScriptRoot\.coverage) {
+        $script:coverageResultsDirectory = Get-Item -Path $PSScriptRoot\.coverage
+    } else {   
+        $script:coverageResultsDirectory = New-Item -Path $PSScriptRoot\.coverage -ItemType Directory
+    }
+
+    # Get Opencover
+    & $script:nuget install OpenCover -Output $script:coverageResultsDirectory
     
-    Get-ChildItem -Path $script:testResultsDirectory -Filter *.xml | ForEach-Object {        
-        $failedTests = (Select-Xml -Path $_.FullName -XPath "//test-case[@result != 'Passed']").Node 
-        if($failedTests) {
-            $failedTests | Select name,result
-        } else {
-            "No test failed: $($_.Name)" | Write-Host -ForegroundColor Green
+    # Get hold on the OpenCover executable
+    $script:openCoverConsole = Get-ChildItem -Path $script:coverageResultsDirectory -Filter OpenCover.Console.Exe -Recurse | Select-Object -ExpandProperty FullName
+
+    # Get ReportGenerator
+    & $script:nuget install ReportGenerator -Output $script:coverageResultsDirectory
+
+    # Get Hold on ReportGerenator executable
+    $script:reportGenerator = Get-ChildItem -Path $script:coverageResultsDirectory -Filter ReportGenerator.Exe -Recurse | Select-Object -ExpandProperty FullName
+}
+
+Task clean_coverage {
+    
+    Remove-Item -Path $PSScriptRoot\.coverage\* -Include @("*.xml","*.htm","*.png","*.css","*.js") -ErrorAction SilentlyContinue
+}
+
+Task measure_coverage -description "Run the unit test under 'test' to measure the tests coverage. Output is written to .coverage directory" {
+
+    # Run test projects with openCover and collect result separted by project in an XML file.
+    
+    $script:projectItems.test | ForEach-Object {
+        $projectDirectory = $_.Directory
+        Get-ChildItem "$($_.Directory.FullName)\bin\Debug\netcoreapp1.0\$($_.Directory.BaseName).Dll" -Recurse | ForEach-Object {
+            "test assembly: $_" | Write-Host
+            & $script:openCoverConsole -oldStyle -target:$script:dotnet -targetdir:$($projectDirectory.FullName) -targetargs:test -register:user -output:$script:coverageResultsDirectory\$($_.BaseName).xml
         }
     }
 
-} -depends query_workspace
+} -depends query_workspace,init_coverage
+
+Task report_coverage -description "Creates a report of the collected coverage data" {
+
+    
+    # Generate a report for avery coverage file found
+    & $script:reportGenerator -targetdir:$script:coverageResultsDirectory -reports:([string]::Join(";",(Get-ChildItem -Path $script:coverageResultsDirectory -Filter *.xml | Select-Object -ExpandProperty FullName)))
+
+    # Start b rowser woth coverage result 
+    ii $script:coverageResultsDirectory\index.htm
+
+} -depends query_workspace,init_coverage
 
 #endregion
 
-Task clean -description "The project tree is clean: all artifacts created by the development tool chain are removed"  -depends clean_workspace,clean_assemblies
+#
+# The default build pipeline
+#
+
+Task clean -description "The project tree is clean: all artifacts created by the development tool chain are removed"  -depends clean_assemblies,clean_packages,clean_coverage
 Task restore -description "External dependencies are restored.The project is ready to be built." -depends restore_dependencies
 Task build -description "The project is built: all artifacts created by the development tool chain are created" -depends restore,build_assemblies
-Task test -description "The project is tested: all automated tests of the project are run" -depends build,test_assemblies
-Task measure -description "The project is measured: all benchmarls are running" -depends build_assemblies,measure_assemblies
+Task test -description "The project is tested: all automated tests of the project are run" -depends build,test_assemblies,report_test_assemblies
 Task pack -description "All nuget packages are built" -depends build_packages
+Task default -depends clean,restore,build,test,pack
+
+#
+# additional build targets
+# 
+
 Task publish -description "All atrefacts are published to their destinations" -depends publish_packages
 Task report -description "Calls all reports" -depends report_test_assemblies
-Task default -depends clean,restore,build,test,pack
+Task coverage -description "Starts a  coverage analysys of the workspace" -depends measure_coverage,report_coverage
+Task measure -description "The project is measured: all benchmarks are running" -depends build_assemblies,measure_assemblies
