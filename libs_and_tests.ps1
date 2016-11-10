@@ -33,7 +33,7 @@ Task clean_dependencies -description "Remove nuget package cache from current us
     Remove-Item (Join-Path $HOME .nuget\packages) -Force -Recurse -ErrorAction SilentlyContinue
 }
 
-Task restore_dependencies -description "Restore nuget dependencies for all projects" {
+Task build_dependencies -description "Restore nuget dependencies for all projects" {
     
     Push-Location $PSScriptRoot
     try {
@@ -75,6 +75,16 @@ Task query_dependencies -description "Print a list of all nuget dependencies. Th
 
 #region Tasks for .Net Assemblies
 
+function Get-TestResults {
+    
+    Get-ChildItem -Path $script:testResultsDirectory -Filter *.xml | ForEach-Object {        
+        
+        # This works for nunit ... but xunit?
+
+        $script:test_assemblies_results = (Select-Xml -Path $_.FullName -XPath "//test-case[@result != 'Passed']").Node | Select name,result
+    }
+}
+
 Task init_assemblies {
     
     # test results are stored in a separate directory
@@ -114,6 +124,7 @@ Task build_assemblies -description "Compile all projects into .Net assemblies" {
 
 Task test_assemblies -description "Run the unit test under 'test'. Output is written to .testresults directory" {
     
+    $script:test_assemblies_results = $null
     $script:projectItems.test | ForEach-Object {
 
         Push-Location $_.Directory
@@ -135,11 +146,11 @@ Task test_assemblies -description "Run the unit test under 'test'. Output is wri
                 # NUnit: 
                 # the projects directory name is taken as the name of the test result file.
                 &  $script:dotnet test -result:$testResultFileName
-
-            } else {
-                "Skipping test project $_ : No test runner defined" | Write-Host -ForegroundColor DarkYellow
+                
+                # After the tes run the results are paresd and stored to a script var
+                $script:test_assemblies_results += Get-TestResults
             }
-
+        
         } finally {
             Pop-Location
         }
@@ -150,17 +161,10 @@ Task test_assemblies -description "Run the unit test under 'test'. Output is wri
 Task report_test_assemblies -description "Retrieves a report of failed tests" {
     
     # The task is seperated from the 'test_assemblies' task to make it callable independently
-
-    Get-ChildItem -Path $script:testResultsDirectory -Filter *.xml | ForEach-Object {        
-        
-        # This works for nunit ... but xunit?
-
-        $failedTests = (Select-Xml -Path $_.FullName -XPath "//test-case[@result != 'Passed']").Node 
-        if($failedTests) {
-            $failedTests | Select name,result
-        } else {
-            "No test failed: $($_.Name)" | Write-Host -ForegroundColor Green
-        }
+    if($script:test_assemblies_results) {
+        $script:test_assemblies_results
+    } else {
+        "No test failed." | Write-Host -ForegroundColor Green
     }
 
 } -depends query_workspace,init_assemblies
@@ -223,7 +227,7 @@ Task build_packages -description "Create nuget packages from all projects having
         }
     }
 
-} -depends query_workspace,init_packages
+} -depends query_workspace,init_packages,clean_packages
 
 Task publish_packages -description "Makes the packages known to the used package source" {
     
@@ -287,7 +291,7 @@ Task clean_coverage {
     Remove-Item -Path $PSScriptRoot\.coverage\* -Include @("*.xml","*.htm","*.png","*.css","*.js") -ErrorAction SilentlyContinue
 }
 
-Task measure_coverage -description "Run the unit test under 'test' to measure the tests coverage. Output is written to .coverage directory" {
+Task build_coverage -description "Run the unit test under 'test' to measure the tests coverage. Output is written to .coverage directory" {
 
     # Run test projects with openCover and collect result separted by project in an XML file.
     
@@ -299,7 +303,7 @@ Task measure_coverage -description "Run the unit test under 'test' to measure th
         }
     }
 
-} -depends query_workspace,init_coverage
+} -depends query_workspace,init_coverage,clean_coverage
 
 Task report_coverage -description "Creates a report of the collected coverage data" {
 
@@ -319,17 +323,17 @@ Task report_coverage -description "Creates a report of the collected coverage da
 #
 
 Task clean -description "The project tree is clean: all artifacts created by the development tool chain are removed"  -depends clean_assemblies,clean_packages,clean_coverage
-Task restore -description "External dependencies are restored.The project is ready to be built." -depends restore_dependencies
+Task restore -description "External dependencies are restored.The project is ready to be built." -depends build_dependencies
 Task build -description "The project is built: all artifacts created by the development tool chain are created" -depends restore,build_assemblies
 Task test -description "The project is tested: all automated tests of the project are run" -depends build,test_assemblies,report_test_assemblies
 Task pack -description "All nuget packages are built" -depends build_packages
 Task default -depends clean,restore,build,test,pack
 
 #
-# additional build targets
+# Additional build targets
 # 
 
-Task publish -description "All atrefacts are published to their destinations" -depends publish_packages
+Task publish -description "All artefacts are published to their destinations" -depends publish_packages
 Task report -description "Calls all reports" -depends report_test_assemblies
-Task coverage -description "Starts a  coverage analysys of the workspace" -depends measure_coverage,report_coverage
+Task coverage -description "Starts a  coverage analysys of the workspace" -depends build_coverage,report_coverage
 Task measure -description "The project is measured: all benchmarks are running" -depends build_assemblies,measure_assemblies
