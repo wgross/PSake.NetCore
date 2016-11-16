@@ -318,6 +318,11 @@ Task report_coverage -description "Creates a report of the collected coverage da
 
 #endregion
 
+Task update_self {
+    # Update this script directly from github
+    Invoke-RestMethod https://raw.githubusercontent.com/wgross/PSake.NetCore/master/libs_and_tests.ps1 -OutFile $PSScriptRoot\default.ps1
+}
+
 #
 # The default build pipeline
 #
@@ -337,3 +342,4 @@ Task publish -description "All artefacts are published to their destinations" -d
 Task report -description "Calls all reports" -depends report_test_assemblies
 Task coverage -description "Starts a  coverage analysys of the workspace" -depends build_coverage,report_coverage
 Task measure -description "The project is measured: all benchmarks are running" -depends build_assemblies,measure_assemblies
+
