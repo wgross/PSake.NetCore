@@ -75,16 +75,6 @@ Task query_dependencies -description "Print a list of all nuget dependencies. Th
 
 #region Tasks for .Net Assemblies
 
-function Get-TestResults {
-    
-    Get-ChildItem -Path $script:testResultsDirectory -Filter *.xml | ForEach-Object {        
-        
-        # This works for nunit ... but xunit?
-
-        $script:test_assemblies_results = (Select-Xml -Path $_.FullName -XPath "//test-case[@result != 'Passed']").Node | Select name,result
-    }
-}
-
 Task init_assemblies {
     
     # test results are stored in a separate directory
@@ -124,7 +114,7 @@ Task build_assemblies -description "Compile all projects into .Net assemblies" {
 
 Task test_assemblies -description "Run the unit test under 'test'. Output is written to .testresults directory" {
     
-    $script:test_assemblies_results = $null
+    $script:test_assemblies_results = [System.Collections.ArrayList]::new()
     $script:projectItems.test | ForEach-Object {
 
         Push-Location $_.Directory
@@ -143,12 +133,8 @@ Task test_assemblies -description "Run the unit test under 'test'. Output is wri
 
             } elseif($testProjectJsonContent.testRunner -eq "nunit") {
 
-                # NUnit: 
                 # the projects directory name is taken as the name of the test result file.
                 &  $script:dotnet test -result:$testResultFileName
-                
-                # After the tes run the results are paresd and stored to a script var
-                $script:test_assemblies_results += Get-TestResults
             }
         
         } finally {
@@ -160,12 +146,33 @@ Task test_assemblies -description "Run the unit test under 'test'. Output is wri
 
 Task report_test_assemblies -description "Retrieves a report of failed tests" {
     
-    # The task is seperated from the 'test_assemblies' task to make it callable independently
-    if($script:test_assemblies_results) {
-        $script:test_assemblies_results
-    } else {
-        "No test failed." | Write-Host -ForegroundColor Green
-    }
+    Get-ChildItem -Path $script:testResultsDirectory -Filter *.xml | ForEach-Object {
+        
+        $testResultContent = [xml](Get-Content $_.FullName)
+
+        if((Select-Xml -Xml $testResultContent -XPath "//assembly")) {
+
+            # must be xunit
+            $failed = (Select-Xml -Xml $testResultContent -XPath "//test[@result != 'Pass']").Node | Select-Object Name,Result
+            if(!$failed) {
+                "No test failed: $($_.FullName)" | Write-Host -ForegroundColor Green
+            } else {
+                "Some tests failed: $($_.FullName)" | Write-Host -ForegroundColor Red
+                $failed | Format-Table
+            }
+
+        } else { 
+            
+            # must be nunit
+            $failed = (Select-Xml -Path $_.FullName -XPath "//test-case[@result != 'Passed']").Node | Select-Object Name,Result
+            if(!$failed) {
+                "No test failed: $($_.FullName)" | Write-Host -ForegroundColor Green
+            } else {
+                "Some tests failed: $($_.FullName)" | Write-Host -ForegroundColor Red
+                $failed | Format-Table
+            }
+        }
+    }        
 
 } -depends query_workspace,init_assemblies
 
