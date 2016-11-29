@@ -1,5 +1,65 @@
 ﻿Import-Module Psake
 
+#region Validate Environment
+
+Task doctor -description "Test dev environment" {
+    
+    Import-Module Pester
+
+    Describe ".Net core framework installation" {
+
+        # dotnet.exe is need for buildung and test execution. 
+        # Without having dotnet.exe in path nothing will work
+
+        It "dotnet cli is in path" {
+            Get-Command dotnet.exe | Should Not Be $null
+        }
+        
+        # Common problem is: Nuget.org is not accessible for package download. 
+        # Nuget.Org provides a dummy package to llookup or download for test purposes
+
+        $lookupUri = "https://www.nuget.org/api/v2/Packages(Id='NuGet.GalleryUptime',Version='1.0.0')"
+        if($Env:HTTP_PROXY) {
+
+            It "Nuget.Org is accessible for lookup through proxy http://$Env:HTTP_PROXY" {
+                Invoke-RestMethod -Proxy "http://$Env:HTTP_PROXY" -Uri $lookupUri | Should Not Be $null
+            } 
+
+        } else {
+
+            It "Nuget.Org is accessible for lookup through windows inet config" {
+                Invoke-RestMethod -Uri $lookupUri | Should Not Be $null
+            }
+        }
+    }
+
+    Describe "Global project configuration" {
+        
+        It "Project root contains global.json" {
+            $script:globalJsonExists = Test-Path $PSScriptRoot\global.json 
+            $script:globalJsonExists | Should Be $true
+        }
+        
+        $globalJsonContent = Get-Content $PSScriptRoot\global.json | ConvertFrom-Json
+
+        It "global.json contains a sdk spec" {
+   
+            $globalJsonContent.sdk.version | Should Not Be $null
+            $script:sdkVersion = $globalJsonContent.sdk.version
+        }
+        
+        It "Subprojects from global.json $([string]::Join(",", $globalJsonContent.projects)) do exist" {
+            $globalJsonContent.projects | ForEach-Object { Join-Path $PSScriptRoot $_ } | Test-Path | Should Be $true
+        } 
+
+        It "Required Framework is installed" {
+            (Get-Command dotnet).Path | Split-Path -Parent | Join-Path -ChildPath "sdk\$script:sdkVersion" | Test-Path | Should Be $true
+        } 
+    }
+}
+
+#endregion
+
 $script:dotnet = (Get-Command dotnet.exe).Path
 $script:nuget = (Get-Command nuget.exe).Path
 
