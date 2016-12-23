@@ -70,13 +70,35 @@ Task query_workspace -description "Collect infomation about the workspace struct
     $script:projectItems = @{}
     $script:projectItems.all = @()
 
-    $globalJsonContent = Get-Content $PSScriptRoot\global.json -Raw | ConvertFrom-Json 
-    $globalJsonContent.projects | ForEach-Object {
-        $projectSubDir = $_ 
-        $script:projectItems.Add($projectSubDir,(Get-ChildItem -Path (Join-Path $PSScriptRoot $projectSubDir)  -Include "project.json" -File -Recurse))
-        $script:projectItems[$projectSubDir] | Select-Object -ExpandProperty FullName | ForEach-Object { Write-Host "found projects in $projectSubDir : $_" }
-        $script:projectItems.all += $script:projectItems[$projectSubDir]
-    } 
+     if(Test-Path $PSScriptRoot\global.json) {
+        
+        # A global.json specfies which project belongs to the solution
+
+        $globalJsonContent = Get-Content  -Path $PSScriptRoot\global.json -Raw | ConvertFrom-Json 
+        $globalJsonContent.projects | ForEach-Object {
+            
+            # separate projects by its group name in global.json
+
+            $projectSubDir = $_ 
+            $script:projectItems.Add($projectSubDir,(Get-ChildItem -Path (Join-Path $PSScriptRoot $projectSubDir) -Include "project.json" -File -Recurse))
+            $script:projectItems[$projectSubDir] | Select-Object -ExpandProperty FullName | ForEach-Object { Write-Host "found projects in $projectSubDir : $_" }
+            $script:projectItems.all += $script:projectItems[$projectSubDir]
+        } 
+
+    } else {
+        
+        # without the global.json we guess (Visual Studio doesn't create a global.json and doesn't seperate the projects in 'src' and 'test')
+        # Best guess is: test projects end with '.Test', all other projects are source projects. 
+        $is_src_project  = { !($_.Directory.Name.ToLowerInvariant().EndsWith("test")) }
+        $is_test_project = { $_.Directory.Name.ToLowerInvariant().EndsWith("test") }
+
+        $script:projectItems.all = (Get-ChildItem -Path (Join-Path $PSScriptRoot $projectSubDir) -Include "project.json" -File -Recurse)
+        $script:projectItems.src = $script:projectItems.all | Where-Object -FilterScript $is_src_project
+        $script:projectItems.src | Select-Object -ExpandProperty FullName | ForEach-Object { Write-Host "found projects in "src" : $_" }
+        $script:projectItems.test = $script:projectItems.all | Where-Object -FilterScript $is_test_project
+        $script:projectItems.test | Select-Object -ExpandProperty FullName | ForEach-Object { Write-Host "found projects in "test" : $_" }
+
+    }
 }
 
 #endregion 
@@ -364,7 +386,7 @@ Task build_coverage -description "Run the unit test under 'test' to measure the 
     
     $script:projectItems.test | ForEach-Object {
         $projectDirectory = $_.Directory
-        Get-ChildItem "$($_.Directory.FullName)\bin\Debug\netcoreapp1.0\$($_.Directory.BaseName).Dll" -Recurse | ForEach-Object {
+        Get-ChildItem "$($_.Directory.FullName)\bin\Debug\netcoreapp1.*\$($_.Directory.BaseName).Dll" -Recurse | ForEach-Object {
             "test assembly: $_" | Write-Host
             & $script:openCoverConsole -oldStyle -target:$script:dotnet -targetdir:$($projectDirectory.FullName) -targetargs:test -register:user -output:$script:coverageResultsDirectory\$($_.BaseName).xml
         }
