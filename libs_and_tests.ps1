@@ -1,5 +1,73 @@
 ﻿Import-Module Psake
 
+Write-Host "$PSScriptRoot\$($MyInvocation.InvocationName).extension.ps1"
+
+# Include additional tasks in the build script
+
+if(Test-Path "$PSScriptRoot\psake.tasks.ps1") {
+    Include -fileNamePathToInclude "$PSScriptRoot\psake.tasks.ps1"
+}
+
+#region Validate Environment
+
+Task doctor -description "Test dev environment" {
+    
+    Import-Module Pester
+
+    Describe ".Net core framework installation" {
+
+        # dotnet.exe is need for buildung and test execution. 
+        # Without having dotnet.exe in path nothing will work
+
+        It "dotnet cli is in path" {
+            Get-Command dotnet.exe | Should Not Be $null
+        }
+        
+        # Common problem is: Nuget.org is not accessible for package download. 
+        # Nuget.Org provides a dummy package to llookup or download for test purposes
+
+        $lookupUri = "https://www.nuget.org/api/v2/Packages(Id='NuGet.GalleryUptime',Version='1.0.0')"
+        if($Env:HTTP_PROXY) {
+
+            It "Nuget.Org is accessible for lookup through proxy http://$Env:HTTP_PROXY" {
+                Invoke-RestMethod -Proxy "http://$Env:HTTP_PROXY" -Uri $lookupUri | Should Not Be $null
+            } 
+
+        } else {
+
+            It "Nuget.Org is accessible for lookup through windows inet config" {
+                Invoke-RestMethod -Uri $lookupUri | Should Not Be $null
+            }
+        }
+    }
+
+    Describe "Global project configuration" {
+        
+        It "Project root contains global.json" {
+            $script:globalJsonExists = Test-Path $PSScriptRoot\global.json 
+            $script:globalJsonExists | Should Be $true
+        }
+        
+        $globalJsonContent = Get-Content $PSScriptRoot\global.json | ConvertFrom-Json
+
+        It "global.json contains a sdk spec" {
+   
+            $globalJsonContent.sdk.version | Should Not Be $null
+            $script:sdkVersion = $globalJsonContent.sdk.version
+        }
+        
+        It "Subprojects from global.json $([string]::Join(",", $globalJsonContent.projects)) do exist" {
+            $globalJsonContent.projects | ForEach-Object { Join-Path $PSScriptRoot $_ } | Test-Path | Should Be $true
+        } 
+
+        It "Required Framework is installed" {
+            (Get-Command dotnet).Path | Split-Path -Parent | Join-Path -ChildPath "sdk\$script:sdkVersion" | Test-Path | Should Be $true
+        } 
+    }
+}
+
+#endregion
+
 $script:dotnet = (Get-Command dotnet.exe).Path
 $script:nuget = (Get-Command nuget.exe).Path
 
@@ -10,13 +78,35 @@ Task query_workspace -description "Collect infomation about the workspace struct
     $script:projectItems = @{}
     $script:projectItems.all = @()
 
-    $globalJsonContent = Get-Content $PSScriptRoot\global.json -Raw | ConvertFrom-Json 
-    $globalJsonContent.projects | ForEach-Object {
-        $projectSubDir = $_ 
-        $script:projectItems.Add($projectSubDir,(Get-ChildItem -Path (Join-Path $PSScriptRoot $projectSubDir)  -Include "project.json" -File -Recurse))
-        $script:projectItems[$projectSubDir] | Select-Object -ExpandProperty FullName | ForEach-Object { Write-Host "found projects in $projectSubDir : $_" }
-        $script:projectItems.all += $script:projectItems[$projectSubDir]
-    } 
+     if(Test-Path $PSScriptRoot\global.json) {
+        
+        # A global.json specfies which project belongs to the solution
+
+        $globalJsonContent = Get-Content  -Path $PSScriptRoot\global.json -Raw | ConvertFrom-Json 
+        $globalJsonContent.projects | ForEach-Object {
+            
+            # separate projects by its group name in global.json
+
+            $projectSubDir = $_ 
+            $script:projectItems.Add($projectSubDir,(Get-ChildItem -Path (Join-Path $PSScriptRoot $projectSubDir) -Include "project.json" -File -Recurse))
+            $script:projectItems[$projectSubDir] | Select-Object -ExpandProperty FullName | ForEach-Object { Write-Host "found projects in $projectSubDir : $_" }
+            $script:projectItems.all += $script:projectItems[$projectSubDir]
+        } 
+
+    } else {
+        
+        # without the global.json we guess (Visual Studio doesn't create a global.json and doesn't seperate the projects in 'src' and 'test')
+        # Best guess is: test projects end with '.Test', all other projects are source projects. 
+        $is_src_project  = { !($_.Directory.Name.ToLowerInvariant().EndsWith("test")) }
+        $is_test_project = { $_.Directory.Name.ToLowerInvariant().EndsWith("test") }
+
+        $script:projectItems.all = (Get-ChildItem -Path (Join-Path $PSScriptRoot $projectSubDir) -Include "project.json" -File -Recurse)
+        $script:projectItems.src = $script:projectItems.all | Where-Object -FilterScript $is_src_project
+        $script:projectItems.src | Select-Object -ExpandProperty FullName | ForEach-Object { Write-Host "found projects in "src" : $_" }
+        $script:projectItems.test = $script:projectItems.all | Where-Object -FilterScript $is_test_project
+        $script:projectItems.test | Select-Object -ExpandProperty FullName | ForEach-Object { Write-Host "found projects in "test" : $_" }
+
+    }
 }
 
 #endregion 
@@ -301,12 +391,13 @@ Task clean_coverage {
 Task build_coverage -description "Run the unit test under 'test' to measure the tests coverage. Output is written to .coverage directory" {
 
     # Run test projects with openCover and collect result separted by project in an XML file.
-    
+    $filterAssemblies = "-[xunit.*]*"
     $script:projectItems.test | ForEach-Object {
         $projectDirectory = $_.Directory
-        Get-ChildItem "$($_.Directory.FullName)\bin\Debug\netcoreapp1.0\$($_.Directory.BaseName).Dll" -Recurse | ForEach-Object {
+        Get-ChildItem "$($_.Directory.FullName)\bin\Debug\netcoreapp1.*\$($_.Directory.BaseName).Dll" -Recurse | ForEach-Object {
             "test assembly: $_" | Write-Host
             & $script:openCoverConsole -oldStyle -target:$script:dotnet -targetdir:$($projectDirectory.FullName) -targetargs:test -register:user -output:$script:coverageResultsDirectory\$($_.BaseName).xml
+            # -filter:$filterAssemblies
         }
     }
 
