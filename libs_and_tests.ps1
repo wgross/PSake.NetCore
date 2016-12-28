@@ -1,6 +1,5 @@
 ﻿Import-Module Psake
 
-Write-Host "$PSScriptRoot\$($MyInvocation.InvocationName).extension.ps1"
 
 # Include additional tasks in the build script
 
